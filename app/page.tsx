@@ -48,6 +48,7 @@ export default function Page() {
     setStatus("")
     setBotId(null)
 
+    // reset ICS state
     setIcsStartIso("")
     setIcsDuration(30)
 
@@ -76,7 +77,46 @@ export default function Page() {
     }
   }
 
-  
+  async function downloadICS() {
+    try {
+      if (!decision?.should_schedule) return
+
+      const startIso = (decision.suggested_start_iso ?? icsStartIso).trim()
+      if (!startIso) {
+        throw new Error(
+          "No exact start time yet. Paste a start time like 2026-01-27T15:00:00-08:00, then download again."
+        )
+      }
+
+      const r = await fetch("/api/calendar/ics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: decision.suggested_title ?? "Follow-up meeting",
+          start_iso: startIso,
+          duration_minutes: decision.duration_minutes ?? icsDuration ?? 30,
+          description: decision.firm_verdict,
+          location: meetingUrl || ""
+        })
+      })
+
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err?.error ?? "Failed to generate .ics")
+      }
+
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = "follow-up.ics"
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      setError(e?.message ?? "ICS download failed")
+    }
+  }
+
   useEffect(() => {
     if (!botId) return
 
@@ -99,7 +139,11 @@ export default function Page() {
         if (data.decision) {
           setDecision(data.decision)
 
-          return 
+          // Prefill ICS fields if model provides them later
+          setIcsStartIso((data.decision.suggested_start_iso ?? "").trim())
+          setIcsDuration(data.decision.duration_minutes ?? 30)
+
+          return // stop polling once decision exists
         }
 
         timer = setTimeout(poll, 2500)
